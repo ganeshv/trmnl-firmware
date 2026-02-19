@@ -35,6 +35,18 @@ BBEPAPER bbep(EP75YR_800x480);
     {EP73_SPECTRA_800x480, EP73_SPECTRA_800x480}, // b = darker grays
 };
 BBEPAPER bbep(EP73_SPECTRA_800x480);
+#elif defined(BOARD_WAVESHARE_ESP32_DRIVER_3CLR)
+    {EP42R2_400x300, EP42R2_400x300}, // default (4.2" B/W/R, Waveshare UC81xx chip)
+    {EP42R2_400x300, EP42R2_400x300}, // a
+    {EP42R2_400x300, EP42R2_400x300}, // b
+};
+BBEPAPER bbep(EP42R2_400x300);
+#elif defined(BOARD_WAVESHARE_ESP32_DRIVER)
+    {EP42_400x300, EP42_400x300}, // default (4.2" B/W)
+    {EP42_400x300, EP42_400x300}, // a
+    {EP42_400x300, EP42_400x300}, // b
+};
+BBEPAPER bbep(EP42_400x300);
 #else
     {EP75_800x480, EP75_800x480_4GRAY}, // default (for original EPD)
     {EP75_800x480_GEN2, EP75_800x480_4GRAY_GEN2}, // a = uses built-in fast + 4-gray
@@ -772,6 +784,134 @@ int png_draw_4clr(PNGDRAW *pDraw)
 } /* png_draw4clr() */
 #endif // BOARD_TRMNL_4CLR (4 color only)
 
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+//
+// Draw one scanline of the PNG into the EPD using 1-bit-per-pixel format.
+// Called twice per image: once for PLANE_0 (B/W) and once for PLANE_1 (Red).
+// pDraw->pUser points to an int holding the target plane (PLANE_0 or PLANE_1).
+//
+int png_draw_3clr(PNGDRAW *pDraw)
+{
+    uint8_t r=0, g=0, b=0, *s, *pPal, *pPalette = pDraw->pPalette;
+    int x, iDelta, iBpp = pDraw->iBpp;
+    uint8_t uc=0, bit, *d, *pTemp = bbep.getCache();
+    int iPlane = *(int *)pDraw->pUser;
+
+    d = pTemp;
+    switch (pDraw->iPixelType) {
+        case PNG_PIXEL_INDEXED:
+            break;
+        case PNG_PIXEL_TRUECOLOR:
+	        if (iBpp <= 8) {
+                iBpp *= 3;
+	        }
+            pPalette = NULL;
+            break;
+        case PNG_PIXEL_TRUECOLOR_ALPHA:
+	        if (iBpp <= 8) {
+                iBpp *= 4;
+	        }
+            pPalette = NULL;
+            break;
+        case PNG_PIXEL_GRAYSCALE:
+            pPalette = NULL;
+            break;
+    } // switch on pixel type
+    iDelta = iBpp/8;
+    s = pDraw->pPixels;
+    for (x=0; x<pDraw->iWidth; x++) {
+        switch (iBpp) {
+            case 24:
+            case 32:
+                r = s[0];
+                g = s[1];
+                b = s[2];
+                s += iDelta;
+                break;
+            case 16:
+                r = s[1] & 0xf8; // red
+                g = ((s[0] | s[1] << 8) >> 3) & 0xfc; // green
+                b = s[0] << 3;
+                s += 2;
+                break;
+                case 8:
+                    if (pPalette) {
+                        pPal = &pPalette[s[0] * 3];
+                        r = pPal[0];
+                        g = pPal[1];
+                        b = pPal[2];
+                    } else {
+                        r = g = b = s[0];
+                    }
+                    s++;
+                    break;
+                case 4:
+                    if (pPalette) {
+                        if (x & 1) {
+                            pPal = &pPalette[(s[0] & 0xf) * 3];
+                            s++;
+                        } else {
+                            pPal = &pPalette[(s[0]>>4) * 3];
+                        }
+                        r = pPal[0];
+                        g = pPal[1];
+                        b = pPal[2];
+                    } else {
+                        if (x & 1) {
+                            r = g = b = (s[0] & 0xf) | (s[0] << 4);
+                            s++;
+                        } else {
+                            r = g = b = (s[0] >> 4) | (s[0] & 0xf0);
+                        }
+                    }
+                    break;
+                case 2:
+                    if (pPalette) {
+                    pPal = &pPalette[((s[0] >> ((3-(x&3))*2)) & 3) * 3];
+                    r = pPal[0]; g = pPal[1]; b = pPal[2];
+                    } else {
+                    r = g = b = (s[0] << ((x&3)*2)) & 0xc0;
+                    }
+                    if ((x & 3) == 3) s++;
+                    break;
+                case 1:
+                    if (pPalette) {
+                        pPal = &pPalette[((s[0] >> (7-(x&7))) & 1) * 3];
+                        r = pPal[0]; g = pPal[1]; b = pPal[2];
+                    } else {
+                        r = g = b = ((s[0] << (x&7)) & 0x80);
+                    }
+                    if ((x & 7) == 7) s++;
+                    break;
+            } // switch on bpp
+            uint8_t color = GetBWRPixel(r, g, b);
+            if (iPlane == PLANE_0) {
+                if (color == BBEP_RED) {
+                    bit = 0; // red pixels handled by PLANE_1; not white on B/W plane
+                } else {
+                    // Bayer 4x4 ordered dithering for gray → B/W
+                    static const uint8_t bayer4[4][4] = {
+                        {  0, 128,  32, 160 },
+                        {192,  64, 224,  96 },
+                        { 48, 176,  16, 144 },
+                        {240, 112, 208,  80 },
+                    };
+                    int gr = (r + g*2 + b) >> 2;
+                    bit = (gr > (int)bayer4[pDraw->y & 3][x & 3]) ? 1 : 0;
+                }
+            } else {
+                bit = (color == BBEP_RED) ? 1 : 0; // DTM2: 1=red, 0=not-red
+            }
+            uc = (uc << 1) | bit;
+            if ((x & 7) == 7) { // 8 pixels per byte
+                *d++ = uc;
+            }
+        } // for x
+    bbep.writeData(pTemp, (pDraw->iWidth+7)/8);
+    return 1; // continue decoding
+} /* png_draw_3clr() */
+#endif // BOARD_WAVESHARE_ESP32_DRIVER_3CLR (3 color B/W/R only)
+
 int png_draw(PNGDRAW *pDraw)
 {
     int x;
@@ -1225,6 +1365,25 @@ PNG *png = new PNG();
             free(png); // free the decoder instance
             return REFRESH_FULL;
 #endif // BOARD_TRMNL_4CLR
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+            Log_info("%s [%d]: decoding for 3-color EPD\r\n", __FILE__, __LINE__);
+            { // B/W plane (PLANE_0)
+                int i3Plane = PLANE_0;
+                png->openRAM((uint8_t *)pPNG, iDataSize, png_draw_3clr);
+                bbep.startWrite(PLANE_0);
+                png->decode(&i3Plane, 0);
+                png->close();
+            }
+            { // Red plane (PLANE_1)
+                int i3Plane = PLANE_1;
+                png->openRAM((uint8_t *)pPNG, iDataSize, png_draw_3clr);
+                bbep.startWrite(PLANE_1);
+                png->decode(&i3Plane, 0);
+                png->close();
+            }
+            free(png);
+            return REFRESH_FULL;
+#endif // BOARD_WAVESHARE_ESP32_DRIVER_3CLR
             bbep.setAddrWindow(0, 0, bbep.width(), bbep.height());
             if (png->getBpp() == 1 || (png->getBpp() == 2 && png_count_colors(png, pPNG, iDataSize) == 2)) { // 1-bit image (single plane)
                 png->close(); // use a different PNGDraw callback for color matching
@@ -1347,10 +1506,14 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait)
 #endif
             int x = (width - pBBB->width)/2;
             int y = (height - pBBB->height)/2; // center it
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+            bbep.fillScreen(BBEP_WHITE); // always clear both planes; red plane must be initialized
+#else
             if (x > 0 || y > 0) // only clear if the image is smaller than the display
             {
                 bbep.fillScreen(BBEP_WHITE);
             }
+#endif
             bbep.loadG5Image(image_buffer, x, y, BBEP_WHITE, BBEP_BLACK);
         }
         else
@@ -1366,6 +1529,9 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait)
         bbep.writePlane(PLANE_FALSE_DIFF);
 #else
         bbep.writePlane(); // send image data to the EPD
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+        bbep.writePlane(PLANE_1); // DTM2: 1=red, 0=not-red
+#endif
 #endif
         iRefreshMode = REFRESH_PARTIAL;
 #endif
@@ -1761,6 +1927,9 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type)
     }
 #ifdef BB_EPAPER
     bbep.writePlane(PLANE_0);
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+    bbep.writePlane(PLANE_1); // DTM2: 1=red, 0=not-red
+#endif
     bbep.refresh(REFRESH_FULL, true);
     bbep.freeBuffer();
 #else
@@ -1849,6 +2018,9 @@ void display_show_msg_qa(uint8_t *image_buffer, const float *voltage, const floa
 
     #ifdef BB_EPAPER
         bbep.writePlane(PLANE_0);
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+        bbep.writePlane(PLANE_1); // DTM2: 1=red, 0=not-red
+#endif
         bbep.refresh(REFRESH_FULL, true);
         bbep.freeBuffer();
     #else
@@ -1892,6 +2064,9 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
         bbep.fillScreen(BBEP_WHITE);
 #ifdef BB_EPAPER
         bbep.writePlane(PLANE_0);
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+        bbep.writePlane(PLANE_1); // DTM2: 1=red, 0=not-red
+#endif
         if (!apiDisplayResult.response.maximum_compatibility) {
             bbep.refresh(REFRESH_FAST, true); // newer panel can handle the fast refresh
         } else {
@@ -2006,6 +2181,9 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
     Log_info("Start drawing...");
 #ifdef BB_EPAPER
     bbep.writePlane(PLANE_0);
+#ifdef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
+    bbep.writePlane(PLANE_1); // DTM2: 1=red, 0=not-red
+#endif
     bbep.refresh(REFRESH_FULL, true);
     bbep.freeBuffer();
 #else
