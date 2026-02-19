@@ -75,7 +75,7 @@
   #define EPD_DC_PIN   4
   #define EPD_BUSY_PIN 6
 
-#elif defined(BOARD_WAVESHARE_ESP32_DRIVER)
+#elif defined(BOARD_WAVESHARE_ESP32_DRIVER) || defined(BOARD_WAVESHARE_ESP32_DRIVER_3CLR)
    // Pin definition for Waveshare ESP32 Driver Board
    #define EPD_SCK_PIN  13
    #define EPD_MOSI_PIN 14

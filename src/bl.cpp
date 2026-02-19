@@ -1905,7 +1905,12 @@ static void goToSleep(void)
   // Configure GPIO pin for wakeup
 #if CONFIG_IDF_TARGET_ESP32
   #define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO)  // 2 ^ GPIO_NUMBER in hex
+  // BOARD_WAVESHARE_ESP32_DRIVER_3CLR: GPIO 33 is driven low by board hardware (no physical button).
+  // Enabling EXT1 wakeup on it would cause the device to wake immediately every sleep cycle.
+  // Skip GPIO wakeup for this board; timer wakeup is sufficient.
+#ifndef BOARD_WAVESHARE_ESP32_DRIVER_3CLR
   esp_sleep_enable_ext1_wakeup(BUTTON_PIN_BITMASK(PIN_INTERRUPT), ESP_EXT1_WAKEUP_ALL_LOW);
+#endif
 #elif CONFIG_IDF_TARGET_ESP32C3
   esp_deep_sleep_enable_gpio_wakeup(1 << PIN_INTERRUPT, ESP_GPIO_WAKEUP_GPIO_LOW);
 #elif CONFIG_IDF_TARGET_ESP32S3
