@@ -879,7 +879,7 @@ int png_draw_3clr(PNGDRAW *pDraw)
                         pPal = &pPalette[((s[0] >> (7-(x&7))) & 1) * 3];
                         r = pPal[0]; g = pPal[1]; b = pPal[2];
                     } else {
-                        r = g = b = ((s[0] << (x&7)) & 0x80);
+                        r = g = b = ((s[0] << (x&7)) & 0x80) ? 0xFF : 0x00; // expand 1-bit to full white/black
                     }
                     if ((x & 7) == 7) s++;
                     break;
@@ -889,15 +889,13 @@ int png_draw_3clr(PNGDRAW *pDraw)
                 if (color == BBEP_RED) {
                     bit = 0; // red pixels handled by PLANE_1; not white on B/W plane
                 } else {
-                    // Bayer 4x4 ordered dithering for gray → B/W
-                    static const uint8_t bayer4[4][4] = {
-                        {  0, 128,  32, 160 },
-                        {192,  64, 224,  96 },
-                        { 48, 176,  16, 144 },
-                        {240, 112, 208,  80 },
+                    // Bayer 2x2 ordered dithering for gray → B/W
+                    static const uint8_t bayer2[2][2] = {
+                        {   0, 128 },
+                        { 192,  64 },
                     };
                     int gr = (r + g*2 + b) >> 2;
-                    bit = (gr > (int)bayer4[pDraw->y & 3][x & 3]) ? 1 : 0;
+                    bit = (gr > (int)bayer2[pDraw->y & 1][x & 1]) ? 1 : 0;
                 }
             } else {
                 bit = (color == BBEP_RED) ? 1 : 0; // DTM2: 1=red, 0=not-red
